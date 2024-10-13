@@ -4,7 +4,7 @@
   "main": "server.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node server.js", 
+    "start": "node server.js",
     "seed": "node prisma/seed.js",
     "build": "prisma generate"
   },
@@ -19,7 +19,8 @@
     "dotenv": "^16.4.5",
     "express": "^4.21.0",
     "mysql": "^2.18.1",
-    "pg": "^8.13.0"
+    "pg": "^8.13.0",
+    "vercel": "^28.18.5"
   },
   "devDependencies": {
     "prisma": "^5.20.0"
