@@ -1,0 +1,66 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Survey {
+  id          Int       @id @default(autoincrement())
+  title       String
+  description String
+  theme       String
+  imageUrl    String?   // Опциональное изображение
+  tags        String[]   // Поддержка тегов
+  isPublic    Boolean    @default(false) // Публичность опроса
+  questions   Question[] // Вопросы, связанные с этим опросом
+
+  @@index([title]) // Индекс для быстрого поиска по заголовку
+}
+
+model Question {
+  id            Int       @id @default(autoincrement())
+  questionText  String
+  questionType  String    // Тип вопроса (например, 'singleLine', 'multiLine', 'positiveInteger', 'checkbox')
+  answerType    String?   // Тип ответа (если требуется, например, для флажков)
+  options       Option[]  // Варианты ответов, если есть
+  surveyId      Int
+  survey        Survey     @relation(fields: [surveyId], references: [id])
+
+  answers       Answer[]   // Обратное отношение к Answer
+
+  @@index([surveyId]) // Индекс для быстрого доступа к вопросам опроса
+}
+
+model Option {
+  id          Int       @id @default(autoincrement())
+  option      String    // Текст варианта ответа
+  questionId  Int
+  question    Question   @relation(fields: [questionId], references: [id]) // Связь с вопросом
+
+  @@index([questionId]) // Индекс для быстрого доступа к вариантам ответов
+}
+
+model Answer {
+  id            Int       @id @default(autoincrement())
+  questionId    Int
+  answerText    String     // Текстовый ответ
+  userId        Int        // ID пользователя, который дал ответ
+  createdAt     DateTime   @default(now()) // Время создания ответа
+
+  question      Question   @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@index([questionId])    // Индекс для questionId
+}
+
+model User {
+  id              Int       @id @default(autoincrement())
+  name            String?
+  password        String?
+  isAdmin         Boolean   @default(false) // Администратор ли пользователь
+  isBlocked       Boolean   @default(false) // Заблокирован ли пользователь
+
+  @@index([name]) // Индекс для поиска по имени
+}
