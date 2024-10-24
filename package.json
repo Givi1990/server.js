@@ -3,11 +3,8 @@
   "version": "1.0.0",
   "main": "server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node server.js",
-    "seed": "node prisma/seed.js",
     "build": "prisma generate",
-    "dev": "nodemon server.js"
+    "start": "node server.js"
   },
   "keywords": [],
   "author": "",
@@ -29,7 +26,6 @@
     "vercel": "^37.9.0"
   },
   "devDependencies": {
-    "nodemon": "^3.1.7",
     "prisma": "^5.20.0"
   },
   "prisma": {

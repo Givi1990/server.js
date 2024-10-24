@@ -11,12 +11,18 @@ const PORT = process.env.PORT || 5000;
 const JWT_SECRET = process.env.JWT_SECRET;
 
 // Middleware
-app.use(cors());
+app.use(cors({
+  origin: '*', 
+}));
+
 app.use(bodyParser.json());
 
 
-// Экспортируем приложение для использования в Vercel
-module.exports = app;
+// Логирование входящих запросов
+app.use((req, res, next) => {
+  console.log(`${req.method} ${req.url}`);
+  next();
+});
 
 // Middleware для проверки токена
 const verifyToken = (req, res, next) => {
@@ -63,6 +69,9 @@ app.get('/surveys', async (req, res) => {
   }
 });
 
+
+
+
 // Получение опроса по ID
 app.get('/surveys/:id', async (req, res) => {
   try {
@@ -76,6 +85,8 @@ app.get('/surveys/:id', async (req, res) => {
     handleError(res, error, 'Ошибка сервера при получении опроса');
   }
 });
+
+
 
 // Получение вопросов опроса по ID опроса
 app.get('/surveys/:surveyId/questions', async (req, res) => {
@@ -97,7 +108,6 @@ app.get('/surveys/:surveyId/questions', async (req, res) => {
         },
       },
     });
-
     // Проверяем, существует ли опрос и есть ли у него вопросы
     if (!survey) {
       return res.status(404).json({ message: 'Опрос не найден' });
@@ -122,8 +132,7 @@ app.post('/surveys', verifyToken, async (req, res) => {
   const { title, description, theme, imageUrl, tags, questions } = req.body;
   if (!title || !description || !theme || !questions || questions.length === 0) {
     return res.status(400).json({ error: 'Все поля обязательны' });
-  }
-  
+  }  
   try {
     const survey = await prisma.survey.create({
       data: {
@@ -196,6 +205,9 @@ app.post('/register', async (req, res) => {
     handleError(res, error, 'Ошибка сервера при регистрации пользователя');
   }
 });
+
+
+
 
 // Эндпоинт для входа пользователя
 app.post('/login', async (req, res) => {
@@ -303,18 +315,68 @@ app.put('/users/:id/:action', async (req, res) => {
 
 
 
-// Эндпоинт для удаления пользователя
-app.delete('/users/:id', async (req, res) => {
-  const { id } = req.params;
-
-  // Проверка авторизации
+// Эндпоинт опросника
+app.delete('/surveys/:id', async (req, res) => {
+  const surveyId = Number(req.params.id);
   const token = req.headers.authorization?.split(' ')[1];
+
   if (!token) {
     return res.status(401).json({ error: 'Необходима авторизация' });
   }
 
   try {
-    // Проверка токена с использованием секретного ключа
+    const payload = jwt.verify(token, JWT_SECRET);
+
+    if (!payload.isAdmin) {
+      return res.status(403).json({ error: 'У вас нет прав доступа' });
+    }
+
+    // Проверяем, существует ли опрос
+    const survey = await prisma.survey.findUnique({
+      where: { id: surveyId },
+      include: { questions: true },
+    });
+
+    if (!survey) {
+      return res.status(404).json({ error: 'Опрос не найден' });
+    }
+
+    // Удаляем все вопросы и их опции
+    for (const question of survey.questions) {
+      await prisma.option.deleteMany({
+        where: { questionId: question.id },
+      });
+    }
+
+    await prisma.question.deleteMany({
+      where: { surveyId: surveyId },
+    });
+
+    // Удаляем опрос
+    await prisma.survey.delete({
+      where: { id: surveyId },
+    });
+
+    res.status(200).json({ message: 'Опрос успешно удалён' });
+  } catch (error) {
+    console.error('Ошибка при удалении опроса:', error);
+    return res.status(500).json({ error: 'Ошибка сервера при удалении опроса', details: error.message });
+  }
+});
+
+
+// Функция для удаления пользователя
+app.delete('/users/:id', async (req, res) => {
+  const { id } = req.params; // Извлечение ID из параметров запроса
+  const token = req.headers.authorization?.split(' ')[1]; // Получение токена из заголовков
+
+  // Проверка наличия токена
+  if (!token) {
+    return res.status(401).json({ error: 'Необходима авторизация' });
+  }
+
+  try {
+    // Проверка токена
     const payload = jwt.verify(token, JWT_SECRET);
 
     // Проверка на роль администратора
@@ -325,14 +387,14 @@ app.delete('/users/:id', async (req, res) => {
     // Сначала удаляем все ответы пользователя
     await prisma.answer.deleteMany({
       where: {
-        userId: Number(id)
-      }
+        userId: Number(id),
+      },
     });
 
     // Получаем все опросы пользователя
     const surveys = await prisma.survey.findMany({
       where: {
-        userId: Number(id)
+        userId: Number(id),
       },
       include: {
         questions: {
@@ -346,11 +408,10 @@ app.delete('/users/:id', async (req, res) => {
     // Удаляем все опции, связанные с вопросами
     for (const survey of surveys) {
       for (const question of survey.questions) {
-        // Удаляем все опции для каждого вопроса
         await prisma.option.deleteMany({
           where: {
-            questionId: question.id
-          }
+            questionId: question.id,
+          },
         });
       }
     }
@@ -359,29 +420,30 @@ app.delete('/users/:id', async (req, res) => {
     for (const survey of surveys) {
       await prisma.question.deleteMany({
         where: {
-          surveyId: survey.id
-        }
+          surveyId: survey.id,
+        },
       });
     }
 
     // Удаляем все опросы пользователя
     await prisma.survey.deleteMany({
       where: {
-        userId: Number(id)
-      }
+        userId: Number(id),
+      },
     });
 
     // Наконец, удаляем пользователя
     const deletedUser = await prisma.user.delete({
-      where: { id: Number(id) }
+      where: { id: Number(id) },
     });
 
-    res.status(200).json({ message: 'Пользователь и его опросы успешно удалены', user: deletedUser });
+    return res.status(200).json({ message: 'Пользователь и его данные успешно удалены', user: deletedUser });
   } catch (error) {
     console.error('Ошибка при удалении пользователя:', error);
     return res.status(500).json({ error: 'Ошибка сервера при удалении пользователя', details: error.message });
   }
 });
+
 
 
 
@@ -730,7 +792,7 @@ process.on('unhandledRejection', (error) => {
   console.error('Unhandled Promise Rejection:', error);
 });
 
-app.get('/', (req, res) => {
+app.get('/x', (req, res) => {
   res.send('Сервер работает!');
 });
 

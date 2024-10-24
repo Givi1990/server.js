@@ -1,19 +1,10 @@
 {
   "version": 2,
-  "builds": [
-    {
-      "src": "server.js",
-      "use": "@vercel/node"
-    }
-  ],
+
   "routes": [
     {
       "src": "/(.*)",
-      "dest": "/server.js"
+      "dest": "server.js" 
     }
-  ],
-  "env": {
-    "DATABASE_URL": "postgresql://forms_maec_user:KS6v483VhmSZwkelkFrq3r2PWHfwe7Hf@dpg-crtr2ge8ii6s73ajlung-a.oregon-postgres.render.com/forms_maec",
-    "JWT_SECRET": "секретный_ключ"
-  }
+  ]
 }
