@@ -9,6 +9,7 @@ const prisma = new PrismaClient();
 const app = express();
 const PORT = process.env.PORT || 5000;
 const JWT_SECRET = process.env.JWT_SECRET;
+const SALEFORSE = process.env.SALEFORSE;
 
 // Middleware
 app.use(cors({
@@ -50,6 +51,43 @@ const handleError = (res, error, message) => {
   console.error(error);
   res.status(500).json({ error: message });
 };
+
+
+// Обработка маршрута /callback для авторизации Salesforce
+app.get('/callback', async (req, res) => {
+  const authorizationCode = req.query.code;
+  
+  if (!authorizationCode) {
+    return res.status(400).send('Authorization code is missing');
+  }
+
+  try {
+    // Запрос на обмен кода авторизации на токены
+    const tokenResponse = await axios.post(SALEFORSE, null, {
+      params: {
+        grant_type: 'authorization_code',
+        client_id: SALESFORCE_CLIENT_ID,
+        client_secret: SALESFORCE_CLIENT_SECRET,
+        redirect_uri: SALESFORCE_REDIRECT_URI,
+        code: authorizationCode,
+      },
+    });
+
+    const { access_token, instance_url, id } = tokenResponse.data;
+
+    res.status(200).json({
+      message: 'Authorization successful!',
+      accessToken: access_token,
+      instanceUrl: instance_url,
+      userId: id,
+    });
+  } catch (error) {
+    console.error('Error exchanging code for token:', error.response?.data || error.message);
+    res.status(500).send('Error during authorization');
+  }
+});
+
+
 
 // Получение всех опросов
 app.get('/surveys', async (req, res) => {
