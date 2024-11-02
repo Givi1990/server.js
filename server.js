@@ -103,9 +103,11 @@ app.get('/surveys', async (req, res) => {
     });
     res.status(200).json(surveys);
   } catch (error) {
-    handleError(res, error, 'Ошибка сервера при получении опросов');
+    console.error('Ошибка базы данных:', error); 
+    res.status(500).json({ error: 'Ошибка сервера при получении опросов' });
   }
 });
+
 
 
 
