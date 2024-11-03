@@ -4,12 +4,15 @@ const cors = require('cors');
 const { PrismaClient } = require('@prisma/client');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
-
+const jsforce = require('jsforce');
+const dotenv = require('dotenv')
 const prisma = new PrismaClient();
 const app = express();
 const PORT = process.env.PORT || 5000;
+const SF_USERNAME = process.env.SF_USERNAME;
+const SF_PASSWORD = process.env.SF_PASSWORD;
+const SF_SECURITY_TOKEN = process.env.SF_SECURITY_TOKEN;
 const JWT_SECRET = process.env.JWT_SECRET;
-const SALEFORSE = process.env.SALEFORSE;
 
 // Middleware
 app.use(cors({
@@ -53,39 +56,86 @@ const handleError = (res, error, message) => {
 };
 
 
-// Обработка маршрута /callback для авторизации Salesforce
-app.get('/callback', async (req, res) => {
-  const authorizationCode = req.query.code;
+
+
+
+
+// Инициализация подключения к Salesforce
+const conn = new jsforce.Connection({
+  loginUrl: 'https://login.salesforce.com',
+});
+
+// Функция для логина в Salesforce
+async function loginToSalesforce() {
+  const passwordWithToken = SF_PASSWORD + SF_SECURITY_TOKEN;
+  console.log('Попытка авторизации в Salesforce...');
+
+  console.log(passwordWithToken);
+  console.log(SF_USERNAME);
+  try {
+    await conn.login(SF_USERNAME, passwordWithToken);
+    console.log('Авторизация прошла успешно!');
+  } catch (e) {
+    console.error('Ошибка аутентификации в Salesforce:', e); 
+    throw new Error(e.message);
+  }
+}
+
+// Эндпоинт для создания контакта
+const createContact = async (req, res) => {
+  console.log('Полученные данные:', req.body);
   
-  if (!authorizationCode) {
-    return res.status(400).send('Authorization code is missing');
+  const { firstName, lastName, email } = req.body;
+
+  const passwordWithToken = `${SF_PASSWORD}${SF_SECURITY_TOKEN}`; 
+  // Проверяем, авторизован ли пользователь
+  if (!conn.accessToken) {
+    try {
+      await loginToSalesforce(SF_USERNAME, passwordWithToken);
+    } catch (error) {
+      console.error('Ошибка аутентификации в Salesforce:', error);
+      return res.status(401).json({ error: 'Ошибка аутентификации. Проверьте данные.' });
+    }
   }
 
   try {
-    // Запрос на обмен кода авторизации на токены
-    const tokenResponse = await axios.post(SALEFORSE, null, {
-      params: {
-        grant_type: 'authorization_code',
-        client_id: SALESFORCE_CLIENT_ID,
-        client_secret: SALESFORCE_CLIENT_SECRET,
-        redirect_uri: SALESFORCE_REDIRECT_URI,
-        code: authorizationCode,
-      },
+    const contactResponse = await conn.sobject('Contact').create({
+      FirstName: firstName,
+      LastName: lastName,
+      Email: email,
+      AccountId: '001Qy00000bEueZIAS', 
     });
 
-    const { access_token, instance_url, id } = tokenResponse.data;
+    return res.json({ contact: contactResponse });
+  } catch (e) {
+    console.error('Ошибка при создании контакта:', e);
+    return res.status(500).json({ message: 'Ошибка при создании контакта.' });
+  }
+};
 
-    res.status(200).json({
-      message: 'Authorization successful!',
-      accessToken: access_token,
-      instanceUrl: instance_url,
-      userId: id,
-    });
+// Регистрируем маршрут
+app.post('/api/createContact', createContact); 
+
+
+// Обновление статуса Salesforce
+app.patch('/:userId/salesforce', async (req, res) => {
+  const { userId } = req.params;
+  console.log('Received request to update Salesforce status for userId:', userId);
+
+  try {
+      const updatedUser = await prisma.user.update({
+          where: { id: parseInt(userId) },
+          data: { salesforce: true }
+      });
+      console.log('Updated user:', updatedUser);
+      res.status(200).json(updatedUser);
   } catch (error) {
-    console.error('Error exchanging code for token:', error.response?.data || error.message);
-    res.status(500).send('Error during authorization');
+      console.error('Error updating Salesforce status:', error);
+      res.status(500).json({ message: 'Ошибка при обновлении статуса Salesforce' });
   }
 });
+
+
 
 
 
@@ -210,7 +260,7 @@ app.post('/surveys', verifyToken, async (req, res) => {
 // Функция для генерации токена
 function generateToken(user) {
   return jwt.sign(
-    { id: user.id, username: user.username, isAdmin: user.isAdmin, isBlocked: user.isBlocked },
+    { id: user.id, username: user.username, isAdmin: user.isAdmin, isBlocked: user.isBlocked, registrationDate: user.registrationDate, salesforce: user.salesforce },
     JWT_SECRET,
     { expiresIn: '1h' }
   );
@@ -298,6 +348,7 @@ app.get('/users', async (req, res) => {
         isAdmin: true,
         isBlocked: true,
         registrationDate: true,
+        salesforce: true,
       },
     });
 
@@ -799,25 +850,7 @@ app.get('/surveys/:surveyId/responses/:userId', verifyToken, async (req, res) =>
 
 
 // Поиск опросов по термину
-app.get('/surveys/search', async (req, res) => {
-  const { term } = req.query;
-  if (!term) return res.status(400).json({ error: 'Термин для поиска обязателен' });
 
-  try {
-    const surveys = await prisma.survey.findMany({
-      where: {
-        OR: [
-          { title: { contains: term, mode: 'insensitive' } },
-          { description: { contains: term, mode: 'insensitive' } },
-        ],
-      },
-      include: { questions: { include: { options: true } } },
-    });
-    res.json(surveys);
-  } catch (error) {
-    handleError(res, error, 'Ошибка при получении опросов');
-  }
-});
 
 // Отключение клиента Prisma при завершении работы приложения
 process.on('SIGINT', async () => {
@@ -842,9 +875,18 @@ app.all('*', (req, res) => {
 });
 
 
-// Запуск сервера
-app.listen(PORT, () => {
-  console.log(`Сервер запущен на порту ${PORT}`);
+// // Запуск сервера
+// app.listen(PORT, () => {
+//   console.log(`Сервер запущен на порту ${PORT}`);
+// });
+
+
+// Запуск сервера и авторизация
+app.listen(PORT, async () => {
+  try {
+    await loginToSalesforce(); 
+    console.log(`Сервер запущен на порту ${PORT}`);
+  } catch (error) {
+    console.error('Не удалось запустить сервер:', error.message);
+  }
 });
-
-
